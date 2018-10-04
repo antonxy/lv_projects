@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Remember to use this script as: ./flash-stlink2-1-STM32F7.sh FIRMWARE.elf
 declare -a ARRAY
