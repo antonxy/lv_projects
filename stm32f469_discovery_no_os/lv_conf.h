@@ -72,12 +72,12 @@
 #define LV_TXT_BREAK_CHARS     " ,.;:-_"         /*Can break texts on these chars*/
 
 /*Graphics feature usage*/
-#define USE_LV_ANIMATION        1               /*1: Enable all animations*/
-#define USE_LV_SHADOW           1               /*1: Enable shadows*/
+#define USE_LV_ANIMATION        0               /*1: Enable all animations*/
+#define USE_LV_SHADOW           0               /*1: Enable shadows*/
 #define USE_LV_GROUP            1               /*1: Enable object groups (for keyboards)*/
 #define USE_LV_GPU              1               /*1: Enable GPU interface*/
-#define USE_LV_REAL_DRAW        1               /*1: Enable function which draw directly to the frame buffer instead of VDB (required if LV_VDB_SIZE = 0)*/
-#define USE_LV_FILESYSTEM       1               /*1: Enable file system (required by images*/
+#define USE_LV_REAL_DRAW        0               /*1: Enable function which draw directly to the frame buffer instead of VDB (required if LV_VDB_SIZE = 0)*/
+#define USE_LV_FILESYSTEM       0               /*1: Enable file system (required by images*/
 
 /*Compiler attributes*/
 #define LV_ATTRIBUTE_TICK_INC                 /* Define a custom attribute to tick increment function */

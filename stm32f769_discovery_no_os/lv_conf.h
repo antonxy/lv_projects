@@ -6,6 +6,9 @@
 #ifndef LV_CONF_H
 #define LV_CONF_H
 
+#include "stm32f769i_discovery_lcd.h"
+#include "stm32f769i_discovery_sdram.h"
+
 /*----------------
  * Dynamic memory
  *----------------*/
@@ -28,24 +31,26 @@
  *===================*/
 
 /* Horizontal and vertical resolution of the library.*/
-#define LV_HOR_RES          (480)
-#define LV_VER_RES          (272)
+#define LV_HOR_RES          (800)
+#define LV_VER_RES          (480)
 #define LV_DPI              100
 
 
-#define SDRAM_ADDR  (0xC0000000)
+#define SDRAM_ADDR (0xC0000000)/* Set in stm32f769i_discovery_sdram.h (0xC0000000) but lvgl needs it to be defined without cast */
+
+//#define LCD_FB_START_ADDRESS SDRAM_ADDR //set in stm32f769i_discovery_lcd.h
 
 /* Size of VDB (Virtual Display Buffer: the internal graphics buffer).
  * Required for buffered drawing, opacity and anti-aliasing
  * VDB makes the double buffering, you don't need to deal with it!
  * Typical size: ~1/10 screen */
-#define LV_VDB_SIZE         (LV_VER_RES  * LV_HOR_RES)  /*Size of VDB in pixel count (1/10 screen size is good for first)*/
-#define LV_VDB_ADR          0                  /*Place VDB to a specific address (e.g. in external RAM) (0: allocate automatically into RAM)*/
+#define LV_VDB_SIZE         (LV_VER_RES  * LV_HOR_RES / 10)  /*Size of VDB in pixel count (1/10 screen size is good for first)*/
+#define LV_VDB_ADR          (SDRAM_ADDR + (LV_HOR_RES * LV_VER_RES * 4)) /*Place VDB to a specific address (e.g. in external RAM) (0: allocate automatically into RAM)*/
 
 /* Use two Virtual Display buffers (VDB) parallelize rendering and flushing (optional)
  * The flushing should use DMA to write the frame buffer in the background*/
 #define LV_VDB_DOUBLE       0       /*1: Enable the use of 2 VDBs*/
-#define LV_VDB2_ADR         (SDRAM_ADDR)+(LV_HOR_RES*LV_VER_RES*2)       /*Place VDB2 to a specific address (e.g. in external RAM) (0: allocate automatically into RAM)*/
+#define LV_VDB2_ADR         ((SDRAM_ADDR)+(LV_HOR_RES*LV_VER_RES*2))       /*Place VDB2 to a specific address (e.g. in external RAM) (0: allocate automatically into RAM)*/
 
 /* Enable anti-aliasing (lines, and radiuses will be smoothed) */
 #define LV_ANTIALIAS        1       /*1: Enable anti-aliasing*/
@@ -67,7 +72,7 @@
 #define LV_INDEV_LONG_PRESS_REP_TIME    100                    /*Repeated trigger period in long press [ms] */
 
 /*Color settings*/
-#define LV_COLOR_DEPTH     16                     /*Color depth: 1/8/16/24*/
+#define LV_COLOR_DEPTH     24                     /*Color depth: 1/8/16/24*/
 #define LV_COLOR_TRANSP    LV_COLOR_LIME          /*Images pixels with this color will not be drawn (with chroma keying)*/
 
 /*Text settings*/
@@ -75,12 +80,12 @@
 #define LV_TXT_BREAK_CHARS     " ,.;:-_"         /*Can break texts on these chars*/
 
 /*Graphics feature usage*/
-#define USE_LV_ANIMATION        1               /*1: Enable all animations*/
-#define USE_LV_SHADOW           1               /*1: Enable shadows*/
+#define USE_LV_ANIMATION        0               /*1: Enable all animations*/
+#define USE_LV_SHADOW           0               /*1: Enable shadows*/
 #define USE_LV_GROUP            1               /*1: Enable object groups (for keyboards)*/
 #define USE_LV_GPU              1               /*1: Enable GPU interface*/
-#define USE_LV_REAL_DRAW        1               /*1: Enable function which draw directly to the frame buffer instead of VDB (required if LV_VDB_SIZE = 0)*/
-#define USE_LV_FILESYSTEM       1               /*1: Enable file system (required by images*/
+#define USE_LV_REAL_DRAW        0               /*1: Enable function which draw directly to the frame buffer instead of VDB (required if LV_VDB_SIZE = 0)*/
+#define USE_LV_FILESYSTEM       0               /*1: Enable file system (required by images*/
 
 /*Compiler settings*/
 #define LV_ATTRIBUTE_TICK_INC                 /* Define a custom attribute to `lv_tick_inc` function */

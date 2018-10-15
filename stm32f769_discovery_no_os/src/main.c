@@ -8,6 +8,7 @@
 #include "stm32f769i_discovery.h"
 
 #include "lv_examples/lv_apps/demo/demo.h"
+#include "lv_examples/lv_apps/tpcal/tpcal.h"
 
 static void SystemClock_Config(void);
 
@@ -28,36 +29,22 @@ int main(void)
     /*Start up indication*/
     BSP_LED_Init(LED1);
     BSP_LED_Init(LED2);
-    for (int i = 0; i < 8; i++) {
-        BSP_LED_Toggle(LED1);
-        BSP_LED_Toggle(LED2);
-        HAL_Delay(100);
-    }
 
-    //lv_init();
+    BSP_LED_On(LED1);
+    BSP_LED_On(LED2);
 
-    for (int i = 0; i < 8; i++) {
-        BSP_LED_Toggle(LED1);
-        HAL_Delay(100);
-    }
+    lv_init();
 
     tft_init();
 
-    for (int i = 0; i < 8; i++) {
-        BSP_LED_Toggle(LED2);
-        HAL_Delay(100);
-    }
-
     touchpad_init();
 
-    for (int i = 0; i < 8; i++) {
-        BSP_LED_Toggle(LED1);
-        BSP_LED_Toggle(LED2);
-        HAL_Delay(300);
-    }
-
-
     demo_create();
+    //tpcal_create();
+
+    BSP_LED_Off(LED1);
+    BSP_LED_Off(LED2);
+
     while (1)
     {
         HAL_Delay(5);

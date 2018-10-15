@@ -11,8 +11,6 @@
 #include "lvgl/lv_core/lv_vdb.h"
 #include "lvgl/lv_hal/lv_hal.h"
 
-#include <string.h>
-
 #include "stm32f7xx.h"
 #include "stm32f769i_discovery.h"
 #include "stm32f769i_discovery_lcd.h"
@@ -23,8 +21,8 @@
 
 #if TFT_EXT_FB != 0
 
-#define SDRAM_BANK_ADDR			SDRAM_DEVICE_ADDR 		/* Set in stm32f769i_discovery_sdram.h (0xC0000000) */
-#define SDRAM_TIMEOUT     ((uint32_t)0xFFFF)
+#define SDRAM_BANK_ADDR SDRAM_DEVICE_ADDR /* Set in stm32f769i_discovery_sdram.h (0xC0000000) */
+#define SDRAM_TIMEOUT ((uint32_t)0xFFFF)
 
 #endif
 
@@ -66,13 +64,6 @@ static void gpu_mem_blend(lv_color_t * dest, const lv_color_t * src, uint32_t le
 static void gpu_mem_fill(lv_color_t * dest, uint32_t length, lv_color_t color);
 #endif
 
-/*LCD*/
-static uint8_t LCD_Init(void);
-void LTDC_Init(void);
-#if TFT_USE_GPU != 0
-static void DMA2D_Config(void);
-#endif
-
 /*DMA to flush to frame buffer*/
 static void DMA_Config(void);
 static void DMA_TransferComplete(DMA_HandleTypeDef *han);
@@ -89,15 +80,16 @@ LTDC_HandleTypeDef hltdc_eval;
 
 #if TFT_USE_GPU != 0
 static DMA2D_HandleTypeDef     Dma2dHandle;
+static void DMA2D_Config(void);
 #endif
 
 #if TFT_EXT_FB != 0
 SDRAM_HandleTypeDef hsdram;
 FMC_SDRAM_TimingTypeDef SDRAM_Timing;
 FMC_SDRAM_CommandTypeDef command;
-static __IO uint16_t * my_fb = (__IO uint16_t*) (SDRAM_BANK_ADDR);
+static __IO uint32_t * my_fb = (__IO uint32_t*) (SDRAM_BANK_ADDR);
 #else
-static uint16_t my_fb[TFT_HOR_RES * TFT_VER_RES];
+static uint32_t my_fb[TFT_HOR_RES * TFT_VER_RES];
 #endif
 
 
@@ -115,7 +107,6 @@ extern DSI_HandleTypeDef hdsi_discovery;
 DSI_CmdCfgTypeDef CmdCfg;
 DSI_LPCmdTypeDef LPCmd;
 DSI_PLLInitTypeDef dsiPllInit;
-static RCC_PeriphCLKInitTypeDef  PeriphClkInitStruct;
 
 /**********************
  *      MACROS
@@ -131,51 +122,19 @@ static RCC_PeriphCLKInitTypeDef  PeriphClkInitStruct;
 void tft_init(void)
 {
 	lv_disp_drv_t disp_drv;
-	//lv_disp_drv_init(&disp_drv);
+	lv_disp_drv_init(&disp_drv);
 
 #if TFT_EXT_FB != 0
 	BSP_SDRAM_Init();
 #endif
 
-	uint8_t lcd_status = LCD_Init();
+	uint8_t lcd_status = BSP_LCD_Init();
 	if (lcd_status != LCD_OK) {
 		Error_Handler();
 	}
 
 	BSP_LCD_LayerDefaultInit(0, LAYER0_ADDRESS);     
 	BSP_LCD_SelectLayer(0); 
-
-  /* Send Display On DCS Command to display */
-  HAL_DSI_ShortWrite(&(hdsi_discovery),
-                     0,
-                     DSI_DCS_SHORT_PKT_WRITE_P1,
-                     OTM8009A_CMD_DISPON,
-                     0x00);
-  
-  /*Refresh the LCD display*/
-  HAL_DSI_Refresh(&hdsi_discovery);
- 
-  BSP_LCD_SetFont(&Font24);  
-  BSP_LCD_SetTextColor(LCD_COLOR_BLUE); 
-  BSP_LCD_FillRect(0, 0, 800, 112);  
-  BSP_LCD_SetTextColor(LCD_COLOR_WHITE);
-  BSP_LCD_FillRect(0, 112, 800, 368);
-  BSP_LCD_SetBackColor(LCD_COLOR_BLUE);  
-  BSP_LCD_DisplayStringAtLine(1, (uint8_t *)"           LCD_DSI_CmdMode_DoubleBuffering");
-  BSP_LCD_SetFont(&Font16);
-  BSP_LCD_DisplayStringAtLine(4, (uint8_t *)"This example shows how to display images on LCD DSI using two buffers");
-  BSP_LCD_DisplayStringAtLine(5, (uint8_t *)"one for display and the other for draw");  
-
-  /*Refresh the LCD display*/
-  HAL_DSI_Refresh(&hdsi_discovery);
-
-
-
-  while (1)
-  {
-    HAL_Delay(2000); 
-  }
-
 
 	DMA_Config();
 
@@ -380,263 +339,6 @@ static void gpu_mem_fill(lv_color_t * dest, uint32_t length, lv_color_t color)
 #endif
 
 /**
-  * @brief  Initializes the DSI LCD. 
-  * The ititialization is done as below:
-  *     - DSI PLL ititialization
-  *     - DSI ititialization
-  *     - LTDC ititialization
-  *     - OTM8009A LCD Display IC Driver ititialization
-  * @param  None
-  * @retval LCD state
-  */
-static uint8_t LCD_Init(void)
-{
-  DSI_PHY_TimerTypeDef  PhyTimings;
-
-  /* Toggle Hardware Reset of the DSI LCD using
-  * its XRES signal (active low) */
-  BSP_LCD_Reset();
-  
-  /* Call first MSP Initialize only in case of first initialization
-  * This will set IP blocks LTDC, DSI and DMA2D
-  * - out of reset
-  * - clocked
-  * - NVIC IRQ related to IP blocks enabled
-  */
-  BSP_LCD_MspInit();
-
-  /* LCD clock configuration */
-  /* PLLSAI_VCO Input = HSE_VALUE/PLL_M = 1 Mhz */
-  /* PLLSAI_VCO Output = PLLSAI_VCO Input * PLLSAIN = 417 Mhz */
-  /* PLLLCDCLK = PLLSAI_VCO Output/PLLSAIR = 417 MHz / 5 = 83.4 MHz */
-  /* LTDC clock frequency = PLLLCDCLK / LTDC_PLLSAI_DIVR_2 = 83.4 / 2 = 41.7 MHz */
-  PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_LTDC;
-  PeriphClkInitStruct.PLLSAI.PLLSAIN = 417;
-  PeriphClkInitStruct.PLLSAI.PLLSAIR = 5;
-  PeriphClkInitStruct.PLLSAIDivR = RCC_PLLSAIDIVR_2;
-  HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct);
-  
-  /* Base address of DSI Host/Wrapper registers to be set before calling De-Init */
-  hdsi_discovery.Instance = DSI;
-  
-  HAL_DSI_DeInit(&(hdsi_discovery));
-  
-  dsiPllInit.PLLNDIV  = 100;
-  dsiPllInit.PLLIDF   = DSI_PLL_IN_DIV5;
-  dsiPllInit.PLLODF   = DSI_PLL_OUT_DIV1;  
-
-  hdsi_discovery.Init.NumberOfLanes = DSI_TWO_DATA_LANES;
-  hdsi_discovery.Init.TXEscapeCkdiv = 0x4;
-  HAL_DSI_Init(&(hdsi_discovery), &(dsiPllInit));
-
-  /* Configure the DSI for Command mode */
-  CmdCfg.VirtualChannelID      = 0;
-  CmdCfg.HSPolarity            = DSI_HSYNC_ACTIVE_HIGH;
-  CmdCfg.VSPolarity            = DSI_VSYNC_ACTIVE_HIGH;
-  CmdCfg.DEPolarity            = DSI_DATA_ENABLE_ACTIVE_HIGH;
-  CmdCfg.ColorCoding           = DSI_RGB888;
-  CmdCfg.CommandSize           = HACT;
-  CmdCfg.TearingEffectSource   = DSI_TE_DSILINK;
-  CmdCfg.TearingEffectPolarity = DSI_TE_RISING_EDGE;
-  CmdCfg.VSyncPol              = DSI_VSYNC_FALLING;
-  CmdCfg.AutomaticRefresh      = DSI_AR_DISABLE;
-  CmdCfg.TEAcknowledgeRequest  = DSI_TE_ACKNOWLEDGE_ENABLE;
-  HAL_DSI_ConfigAdaptedCommandMode(&hdsi_discovery, &CmdCfg);
-  
-  LPCmd.LPGenShortWriteNoP    = DSI_LP_GSW0P_ENABLE;
-  LPCmd.LPGenShortWriteOneP   = DSI_LP_GSW1P_ENABLE;
-  LPCmd.LPGenShortWriteTwoP   = DSI_LP_GSW2P_ENABLE;
-  LPCmd.LPGenShortReadNoP     = DSI_LP_GSR0P_ENABLE;
-  LPCmd.LPGenShortReadOneP    = DSI_LP_GSR1P_ENABLE;
-  LPCmd.LPGenShortReadTwoP    = DSI_LP_GSR2P_ENABLE;
-  LPCmd.LPGenLongWrite        = DSI_LP_GLW_ENABLE;
-  LPCmd.LPDcsShortWriteNoP    = DSI_LP_DSW0P_ENABLE;
-  LPCmd.LPDcsShortWriteOneP   = DSI_LP_DSW1P_ENABLE;
-  LPCmd.LPDcsShortReadNoP     = DSI_LP_DSR0P_ENABLE;
-  LPCmd.LPDcsLongWrite        = DSI_LP_DLW_ENABLE;
-  HAL_DSI_ConfigCommand(&hdsi_discovery, &LPCmd);
-
-  /* Initialize LTDC */
-  LTDC_Init();
-  
-  /* Start DSI */
-  HAL_DSI_Start(&(hdsi_discovery));
-
-  /* Configure DSI PHY HS2LP and LP2HS timings */
-  PhyTimings.ClockLaneHS2LPTime = 35;
-  PhyTimings.ClockLaneLP2HSTime = 35;
-  PhyTimings.DataLaneHS2LPTime = 35;
-  PhyTimings.DataLaneLP2HSTime = 35;
-  PhyTimings.DataLaneMaxReadTime = 0;
-  PhyTimings.StopWaitTime = 10;
-  HAL_DSI_ConfigPhyTimer(&hdsi_discovery, &PhyTimings);  
-    
-  /* Initialize the OTM8009A LCD Display IC Driver (KoD LCD IC Driver)
-  *  depending on configuration set in 'hdsivideo_handle'.
-  */
-  OTM8009A_Init(OTM8009A_COLMOD_RGB888, LCD_ORIENTATION_LANDSCAPE);
-  
-  LPCmd.LPGenShortWriteNoP    = DSI_LP_GSW0P_DISABLE;
-  LPCmd.LPGenShortWriteOneP   = DSI_LP_GSW1P_DISABLE;
-  LPCmd.LPGenShortWriteTwoP   = DSI_LP_GSW2P_DISABLE;
-  LPCmd.LPGenShortReadNoP     = DSI_LP_GSR0P_DISABLE;
-  LPCmd.LPGenShortReadOneP    = DSI_LP_GSR1P_DISABLE;
-  LPCmd.LPGenShortReadTwoP    = DSI_LP_GSR2P_DISABLE;
-  LPCmd.LPGenLongWrite        = DSI_LP_GLW_DISABLE;
-  LPCmd.LPDcsShortWriteNoP    = DSI_LP_DSW0P_DISABLE;
-  LPCmd.LPDcsShortWriteOneP   = DSI_LP_DSW1P_DISABLE;
-  LPCmd.LPDcsShortReadNoP     = DSI_LP_DSR0P_DISABLE;
-  LPCmd.LPDcsLongWrite        = DSI_LP_DLW_DISABLE;
-  HAL_DSI_ConfigCommand(&hdsi_discovery, &LPCmd);
-  
-   HAL_DSI_ConfigFlowControl(&hdsi_discovery, DSI_FLOW_CONTROL_BTA);
-
-  /* Send Display Off DCS Command to display */
-  HAL_DSI_ShortWrite(&(hdsi_discovery),
-                     0,
-                     DSI_DCS_SHORT_PKT_WRITE_P1,
-                     OTM8009A_CMD_DISPOFF,
-                     0x00);
-
-  /* Refresh the display */
-  HAL_DSI_Refresh(&hdsi_discovery);
-  
-  return LCD_OK; 
-}
-
-/**
-  * @brief  
-  * @param  None
-  * @retval None
-  */
-void LTDC_Init(void)
-{
-  /* DeInit */
-  HAL_LTDC_DeInit(&hltdc_discovery);
-  
-  /* LTDC Config */
-  /* Timing and polarity */
-  hltdc_discovery.Init.HorizontalSync = HSYNC;
-  hltdc_discovery.Init.VerticalSync = VSYNC;
-  hltdc_discovery.Init.AccumulatedHBP = HSYNC+HBP;
-  hltdc_discovery.Init.AccumulatedVBP = VSYNC+VBP;
-  hltdc_discovery.Init.AccumulatedActiveH = VSYNC+VBP+VACT;
-  hltdc_discovery.Init.AccumulatedActiveW = HSYNC+HBP+HACT;
-  hltdc_discovery.Init.TotalHeigh = VSYNC+VBP+VACT+VFP;
-  hltdc_discovery.Init.TotalWidth = HSYNC+HBP+HACT+HFP;
-  
-  /* background value */
-  hltdc_discovery.Init.Backcolor.Blue = 0;
-  hltdc_discovery.Init.Backcolor.Green = 0;
-  hltdc_discovery.Init.Backcolor.Red = 0;
-  
-  /* Polarity */
-  hltdc_discovery.Init.HSPolarity = LTDC_HSPOLARITY_AL;
-  hltdc_discovery.Init.VSPolarity = LTDC_VSPOLARITY_AL;
-  hltdc_discovery.Init.DEPolarity = LTDC_DEPOLARITY_AL;
-  hltdc_discovery.Init.PCPolarity = LTDC_PCPOLARITY_IPC;
-  hltdc_discovery.Instance = LTDC;
-
-  HAL_LTDC_Init(&hltdc_discovery);
-}
-
-#if TFT_USE_GPU != 0
-/**
-  * @brief  DMA2D Transfer completed callback
-  * @param  hdma2d: DMA2D handle.
-  * @note   This example shows a simple way to report end of DMA2D transfer, and
-  *         you can add your own implementation.
-  * @retval None
-  */
-static void DMA2D_TransferComplete(DMA2D_HandleTypeDef *hdma2d)
-{
-
-}
-
-/**
-  * @brief  DMA2D error callbacks
-  * @param  hdma2d: DMA2D handle
-  * @note   This example shows a simple way to report DMA2D transfer error, and you can
-  *         add your own implementation.
-  * @retval None
-  */
-static void DMA2D_TransferError(DMA2D_HandleTypeDef *hdma2d)
-{
-
-}
-
-/**
-  * @brief DMA2D configuration.
-  * @note  This function Configure the DMA2D peripheral :
-  *        1) Configure the Transfer mode as memory to memory with blending.
-  *        2) Configure the output color mode as RGB565 pixel format.
-  *        3) Configure the foreground
-  *          - first image loaded from FLASH memory
-  *          - constant alpha value (decreased to see the background)
-  *          - color mode as RGB565 pixel format
-  *        4) Configure the background
-  *          - second image loaded from FLASH memory
-  *          - color mode as RGB565 pixel format
-  * @retval None
-  */
-static void DMA2D_Config(void)
-{
-  /* Configure the DMA2D Mode, Color Mode and output offset */
-  Dma2dHandle.Init.Mode         = DMA2D_M2M_BLEND;
-  Dma2dHandle.Init.ColorMode    = DMA2D_RGB565 ;
-  Dma2dHandle.Init.OutputOffset = 0x0;
-
-  /* DMA2D Callbacks Configuration */
-  Dma2dHandle.XferCpltCallback  = DMA2D_TransferComplete;
-  Dma2dHandle.XferErrorCallback = DMA2D_TransferError;
-
-  /* Foreground Configuration */
-  Dma2dHandle.LayerCfg[1].AlphaMode = DMA2D_REPLACE_ALPHA;
-  Dma2dHandle.LayerCfg[1].InputAlpha = 0xFF;
-  Dma2dHandle.LayerCfg[1].InputColorMode = DMA2D_INPUT_RGB565;
-  Dma2dHandle.LayerCfg[1].InputOffset = 0x0;
-
-  /* Background Configuration */
-  Dma2dHandle.LayerCfg[0].AlphaMode = DMA2D_REPLACE_ALPHA;
-  Dma2dHandle.LayerCfg[0].InputAlpha = 0xFF;
-  Dma2dHandle.LayerCfg[0].InputColorMode = DMA2D_INPUT_RGB565;
-  Dma2dHandle.LayerCfg[0].InputOffset = 0x0;
-
-  Dma2dHandle.Instance   = DMA2D;
-
-  /* DMA2D Initialization */
-  if(HAL_DMA2D_Init(&Dma2dHandle) != HAL_OK)
-  {
-    /* Initialization Error */
-    Error_Handler();
-  }
-
-  HAL_DMA2D_ConfigLayer(&Dma2dHandle, 0);
-  HAL_DMA2D_ConfigLayer(&Dma2dHandle, 1);
-}
-#endif
-
-/**
-  * @brief DMA2D MSP Initialization
-  *        This function configures the hardware resources used in this example:
-  *           - Peripheral's clock enable
-  *           - Peripheral's GPIO Configuration
-  * @param hdma2d: DMA2D handle pointer
-  * @retval None
-  */
-void HAL_DMA2D_MspInit(DMA2D_HandleTypeDef *hdma2d)
-{
-  /*##-1- Enable peripherals and GPIO Clocks #################################*/
-  __HAL_RCC_DMA2D_CLK_ENABLE();
-
-  /*##-2- NVIC configuration  ################################################*/
-  /* NVIC configuration for DMA2D transfer complete interrupt */
-  HAL_NVIC_SetPriority(DMA2D_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA2D_IRQn);
-}
-
-
-/**
   * @brief  Configure the DMA controller according to the Stream parameters
   *         defined in main.h file
   * @note  This function is used to :
@@ -660,8 +362,8 @@ static void DMA_Config(void)
   DmaHandle.Init.Direction = DMA_MEMORY_TO_MEMORY;          /* M2M transfer mode                */
   DmaHandle.Init.PeriphInc = DMA_PINC_ENABLE;               /* Peripheral increment mode Enable */
   DmaHandle.Init.MemInc = DMA_MINC_ENABLE;                  /* Memory increment mode Enable     */
-  DmaHandle.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD; /* Peripheral data alignment : 16bit */
-  DmaHandle.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;    /* memory data alignment : 16bit     */
+  DmaHandle.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD; /* Peripheral data alignment : 16bit */
+  DmaHandle.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;    /* memory data alignment : 16bit     */
   DmaHandle.Init.Mode = DMA_NORMAL;                         /* Normal DMA mode                  */
   DmaHandle.Init.Priority = DMA_PRIORITY_HIGH;              /* priority level : high            */
   DmaHandle.Init.FIFOMode = DMA_FIFOMODE_ENABLE;            /* FIFO mode enabled                */
@@ -675,8 +377,8 @@ static void DMA_Config(void)
   /*##-4- Initialize the DMA stream ##########################################*/
   if(HAL_DMA_Init(&DmaHandle) != HAL_OK)
   {
-    /* Turn LED1 on: in case of Initialization Error */
-    BSP_LED_On(LED1);
+    /* Turn LED4 on: in case of Initialization Error */
+    BSP_LED_On(LED2);
     while(1)
     {
     }
@@ -739,6 +441,83 @@ void DMA_STREAM_IRQHANDLER(void)
     /* Check the interrupt and clear flag */
     HAL_DMA_IRQHandler(&DmaHandle);
 }
+
+#if TFT_USE_GPU != 0
+/**
+  * @brief  DMA2D Transfer completed callback
+  * @param  hdma2d: DMA2D handle.
+  * @note   This example shows a simple way to report end of DMA2D transfer, and
+  *         you can add your own implementation.
+  * @retval None
+  */
+static void DMA2D_TransferComplete(DMA2D_HandleTypeDef *hdma2d)
+{
+
+}
+
+/**
+  * @brief  DMA2D error callbacks
+  * @param  hdma2d: DMA2D handle
+  * @note   This example shows a simple way to report DMA2D transfer error, and you can
+  *         add your own implementation.
+  * @retval None
+  */
+static void DMA2D_TransferError(DMA2D_HandleTypeDef *hdma2d)
+{
+
+}
+
+/**
+  * @brief DMA2D configuration.
+  * @note  This function Configure the DMA2D peripheral :
+  *        1) Configure the Transfer mode as memory to memory with blending.
+  *        2) Configure the output color mode as RGB565 pixel format.
+  *        3) Configure the foreground
+  *          - first image loaded from FLASH memory
+  *          - constant alpha value (decreased to see the background)
+  *          - color mode as RGB565 pixel format
+  *        4) Configure the background
+  *          - second image loaded from FLASH memory
+  *          - color mode as RGB565 pixel format
+  * @retval None
+  */
+static void DMA2D_Config(void)
+{
+  /* Configure the DMA2D Mode, Color Mode and output offset */
+  Dma2dHandle.Init.Mode         = DMA2D_M2M_BLEND;
+  Dma2dHandle.Init.ColorMode    = DMA2D_ARGB8888;
+  Dma2dHandle.Init.OutputOffset = 0x0;
+
+  /* DMA2D Callbacks Configuration */
+  Dma2dHandle.XferCpltCallback  = DMA2D_TransferComplete;
+  Dma2dHandle.XferErrorCallback = DMA2D_TransferError;
+
+  /* Foreground Configuration */
+  Dma2dHandle.LayerCfg[1].AlphaMode = DMA2D_REPLACE_ALPHA;
+  Dma2dHandle.LayerCfg[1].InputAlpha = 0xFF;
+  Dma2dHandle.LayerCfg[1].InputColorMode = DMA2D_INPUT_ARGB8888;
+  Dma2dHandle.LayerCfg[1].InputOffset = 0x0;
+
+  /* Background Configuration */
+  Dma2dHandle.LayerCfg[0].AlphaMode = DMA2D_REPLACE_ALPHA;
+  Dma2dHandle.LayerCfg[0].InputAlpha = 0xFF;
+  Dma2dHandle.LayerCfg[0].InputColorMode = DMA2D_INPUT_ARGB8888;
+  Dma2dHandle.LayerCfg[0].InputOffset = 0x0;
+
+  Dma2dHandle.Instance   = DMA2D;
+
+  /* DMA2D Initialization */
+  if(HAL_DMA2D_Init(&Dma2dHandle) != HAL_OK)
+  {
+    /* Initialization Error */
+    Error_Handler();
+  }
+
+  HAL_DMA2D_ConfigLayer(&Dma2dHandle, 0);
+  HAL_DMA2D_ConfigLayer(&Dma2dHandle, 1);
+}
+#endif
+
 
 
 /**
